@@ -21,6 +21,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import com.amazonaws.auth.AWSCredentialsProviderChain;
+import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
+import com.amazonaws.util.StringUtils;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.settings.Server;
@@ -39,6 +42,8 @@ import com.amazonaws.services.cloudformation.model.Parameter;
 import com.amazonaws.services.cloudformation.model.Stack;
 import com.amazonaws.services.cloudformation.model.UpdateStackRequest;
 import com.amazonaws.services.s3.AmazonS3Client;
+
+import static com.amazonaws.util.StringUtils.isNullOrEmpty;
 
 /**
  * Goal which uploads an artifact to S3 and then updates a Cloud Formation stack in AWS.
@@ -105,8 +110,9 @@ public class CloudFormationMojo extends AbstractMojo {
         }
         String artifactKey = artifactFile.getName();
         getLog().info("Artifact Name: " + artifactKey);
-        
-        BasicAWSCredentials awsCredentials = new BasicAWSCredentials(accessKey, secretKey);
+
+		AWSCredentials awsCredentials =  getAWSCredentials();
+
         AmazonCloudFormationClient cfClient = new AmazonCloudFormationClient(awsCredentials);
         cfClient.setEndpoint(getCloudFormationEndPoint());
         AmazonS3Client s3Client = new AmazonS3Client(awsCredentials);
@@ -207,20 +213,32 @@ public class CloudFormationMojo extends AbstractMojo {
 	    }
         return stack;
     }
-    
+
+	/**
+	 * Load the AWS credentials to use in this mojo.  If they were specified via configuration, those will be used.
+	 * Otherwise the default credentials chain will be used to load them from either the environment, system properties,
+	 * or AWS configuration.
+	 *
+	 * @return
+	 * @throws MojoExecutionException
+	 */
     protected AWSCredentials getAWSCredentials() throws MojoExecutionException {
-    	/*if (settings != null && serverId != null) {
-    		Server server = settings.getServer(serverId);
-    		if (server != null) {
-    			accessKey = server.getUsername().trim();
-    			secretKey = server.getPassword().trim();
-    			// TODO: Decrypt https://bitbucket.org/aldrinleal/beanstalker/src/d72b183f832cd81c670ca1e4ae764868cdfd16b9/beanstalker-common/src/main/java/br/com/ingenieux/mojo/aws/AbstractAWSMojo.java?at=default
-    		}
-    	}*/
-    	if (accessKey == null || secretKey == null || accessKey.isEmpty() || secretKey.isEmpty()) {
-    		throw new MojoExecutionException("Missing either accessKey and secretKey.");
+		AWSCredentials awsCredentials;
+
+		// If the accessKey and secretKey aren't provided, use the default credentials chain instead.
+		if( isNullOrEmpty(accessKey) && isNullOrEmpty(secretKey) ) {
+			AWSCredentialsProviderChain chain = new DefaultAWSCredentialsProviderChain();
+			awsCredentials = chain.getCredentials();
+			getLog().debug( "Loading AWS Credentials from default credentials chain." );
+		} else {
+			awsCredentials = new BasicAWSCredentials(accessKey, secretKey);
+		}
+
+    	if ( isNullOrEmpty( awsCredentials.getAWSAccessKeyId() ) || isNullOrEmpty( awsCredentials.getAWSSecretKey() ) ) {
+    		throw new MojoExecutionException("Missing aws accessKey or secretKey");
     	}
-    	return new BasicAWSCredentials(accessKey, secretKey);
+
+		return awsCredentials;
     }
     
     /**
